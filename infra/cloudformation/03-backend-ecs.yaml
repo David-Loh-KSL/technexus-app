@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  TechNexus - Backend stack: ECR repo, ECS Fargate service behind an ALB.
+  The pipeline updates this stack's ImageTag parameter on each deploy —
+  that parameter change is what CodePipeline's CloudFormation deploy action
+  promotes from Dev to UAT.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, uat, prod]
+
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Docker image tag to deploy (set per pipeline execution / promotion)
+
+  ContainerPort:
+    Type: Number
+    Default: 3000
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+
+  # The Anthropic API key must be created manually in Secrets Manager first
+  # (never put a real key in a template or parameter file committed to Git).
+  #   aws secretsmanager create-secret --name technexus/<env>/anthropic-api-key \
+  #     --secret-string '{"ANTHROPIC_API_KEY":"sk-ant-..."}'
+  AnthropicSecretArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret holding ANTHROPIC_API_KEY
+
+Resources:
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub technexus-backend-${EnvironmentName}
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub technexus-${EnvironmentName}
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub technexus-${EnvironmentName}-ecs-exec-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ReadSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref AnthropicSecretArn
+                  - Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBSecretArn
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub technexus-${EnvironmentName}-ecs-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/technexus-${EnvironmentName}
+      RetentionInDays: 14
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub technexus-${EnvironmentName}
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '512'
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: backend
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/technexus-backend-${EnvironmentName}:${ImageTag}
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+          Environment:
+            - Name: PORT
+              Value: !Ref ContainerPort
+            - Name: PGHOST
+              Value:
+                Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBEndpoint
+            - Name: PGPORT
+              Value:
+                Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBPort
+            - Name: PGDATABASE
+              Value: technexus
+            - Name: PGSSL
+              Value: 'true'
+          Secrets:
+            - Name: PGUSER
+              ValueFrom:
+                Fn::Sub:
+                  - '${SecretArn}:username::'
+                  - SecretArn:
+                      Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBSecretArn
+            - Name: PGPASSWORD
+              ValueFrom:
+                Fn::Sub:
+                  - '${SecretArn}:password::'
+                  - SecretArn:
+                      Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBSecretArn
+            - Name: ANTHROPIC_API_KEY
+              ValueFrom: !Sub '${AnthropicSecretArn}:ANTHROPIC_API_KEY::'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: backend
+
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub TechNexus backend service SG (${EnvironmentName})
+      VpcId:
+        Fn::ImportValue: !Sub technexus-${EnvironmentName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  # Allow the backend service to reach RDS on 5432
+  DBIngressFromBackend:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ServiceSecurityGroup
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub TechNexus ALB SG (${EnvironmentName})
+      VpcId:
+        Fn::ImportValue: !Sub technexus-${EnvironmentName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub technexus-${EnvironmentName}-alb
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups: [!Ref ALBSecurityGroup]
+      Subnets:
+        - Fn::ImportValue: !Sub technexus-${EnvironmentName}-PublicSubnet1
+        - Fn::ImportValue: !Sub technexus-${EnvironmentName}-PublicSubnet2
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub technexus-${EnvironmentName}-tg
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      VpcId:
+        Fn::ImportValue: !Sub technexus-${EnvironmentName}-VpcId
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      ServiceName: !Sub technexus-${EnvironmentName}
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - Fn::ImportValue: !Sub technexus-${EnvironmentName}-PrivateSubnet1
+            - Fn::ImportValue: !Sub technexus-${EnvironmentName}-PrivateSubnet2
+          SecurityGroups: [!Ref ServiceSecurityGroup]
+      LoadBalancers:
+        - ContainerName: backend
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  ApiUrl:
+    Value: !Sub http://${ALB.DNSName}
+    Export:
+      Name: !Sub technexus-${EnvironmentName}-ApiUrl
+  EcrRepositoryUri:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/technexus-backend-${EnvironmentName}
+    Export:
+      Name: !Sub technexus-${EnvironmentName}-EcrRepositoryUri
+  ClusterName:
+    Value: !Ref Cluster
+  ServiceName:
+    Value: !GetAtt Service.Name

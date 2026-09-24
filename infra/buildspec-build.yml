@@ -1,0 +1,53 @@
+version: 0.2
+
+env:
+  variables:
+    ECR_REPO_DEV: "technexus-backend-dev"
+    ECR_REPO_UAT: "technexus-backend-uat"
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - echo "Installing backend dependencies"
+      - cd backend && npm ci && cd ..
+      - echo "Installing frontend dependencies"
+      - cd frontend && npm ci && cd ..
+
+  pre_build:
+    commands:
+      - echo "Running backend tests"
+      - cd backend && npm test && cd ..
+      - IMAGE_TAG="build-${CODEBUILD_BUILD_NUMBER}"
+      - echo "IMAGE_TAG=$IMAGE_TAG" > image_tag.env
+      - echo $IMAGE_TAG > imagetag.txt
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+      # Create the Dev ECR repo if this is the first-ever build (idempotent)
+      - aws ecr describe-repositories --repository-names $ECR_REPO_DEV --region $AWS_DEFAULT_REGION || aws ecr create-repository --repository-name $ECR_REPO_DEV --region $AWS_DEFAULT_REGION
+      - aws ecr describe-repositories --repository-names $ECR_REPO_UAT --region $AWS_DEFAULT_REGION || aws ecr create-repository --repository-name $ECR_REPO_UAT --region $AWS_DEFAULT_REGION
+
+  build:
+    commands:
+      - echo "Building backend Docker image"
+      - docker build -t backend:$IMAGE_TAG ./backend
+      # Same image is tagged into BOTH the Dev and UAT repos so Dev and UAT
+      # run the exact same artifact — only the CloudFormation ImageTag
+      # parameter differs between the two deploy stages.
+      - docker tag backend:$IMAGE_TAG ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO_DEV}:$IMAGE_TAG
+      - docker tag backend:$IMAGE_TAG ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO_UAT}:$IMAGE_TAG
+      - docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO_DEV}:$IMAGE_TAG
+      - docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO_UAT}:$IMAGE_TAG
+      - echo "Building frontend"
+      - cd frontend && npm run build && cd ..
+
+  post_build:
+    commands:
+      - echo "Build complete. Image tag $IMAGE_TAG pushed to Dev and UAT ECR repos."
+
+artifacts:
+  files:
+    - imagetag.txt
+    - infra/**/*
+    - frontend/dist/**/*
+  discard-paths: no

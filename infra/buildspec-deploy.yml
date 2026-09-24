@@ -1,0 +1,73 @@
+version: 0.2
+
+# Reused for both the DeployToDev and DeployToUAT pipeline stages.
+# ENVIRONMENT_NAME and ANTHROPIC_SECRET_ARN are set per CodeBuild project
+# (see 05-pipeline.yaml) — this is what makes "promotion" mean re-running
+# the exact same buildspec/artifact against a different target environment.
+
+phases:
+  install:
+    commands:
+      - IMAGE_TAG=$(cat imagetag.txt)
+      - echo "Deploying image tag $IMAGE_TAG to environment $ENVIRONMENT_NAME"
+
+  build:
+    commands:
+      - echo "Deploying network stack (no-op if unchanged)"
+      - >
+        aws cloudformation deploy
+        --stack-name technexus-network-${ENVIRONMENT_NAME}
+        --template-file infra/cloudformation/01-network.yaml
+        --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME}
+        --no-fail-on-empty-changeset
+
+      - echo "Deploying database stack"
+      - >
+        aws cloudformation deploy
+        --stack-name technexus-database-${ENVIRONMENT_NAME}
+        --template-file infra/cloudformation/02-database.yaml
+        --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME}
+        --no-fail-on-empty-changeset
+
+      - echo "Deploying backend ECS stack with image tag $IMAGE_TAG"
+      - >
+        aws cloudformation deploy
+        --stack-name technexus-backend-${ENVIRONMENT_NAME}
+        --template-file infra/cloudformation/03-backend-ecs.yaml
+        --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME} ImageTag=${IMAGE_TAG} AnthropicSecretArn=${ANTHROPIC_SECRET_ARN}
+        --capabilities CAPABILITY_NAMED_IAM
+        --no-fail-on-empty-changeset
+
+      - echo "Deploying frontend hosting stack"
+      - >
+        aws cloudformation deploy
+        --stack-name technexus-frontend-${ENVIRONMENT_NAME}
+        --template-file infra/cloudformation/04-frontend-hosting.yaml
+        --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME}
+        --no-fail-on-empty-changeset
+
+      - echo "Fetching API URL to bake into the frontend build"
+      - >
+        API_URL=$(aws cloudformation describe-stacks --stack-name technexus-backend-${ENVIRONMENT_NAME}
+        --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+      - echo "API_URL=$API_URL"
+
+      # Rebuild the frontend with this environment's API URL baked in.
+      # (Vite bakes VITE_* vars in at build time, so each environment needs
+      # its own quick rebuild here rather than reusing one static bundle.)
+      - cd frontend && VITE_API_BASE_URL=$API_URL npm run build && cd ..
+
+      - BUCKET=$(aws cloudformation describe-stacks --stack-name technexus-frontend-${ENVIRONMENT_NAME}
+        --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text)
+      - DIST_ID=$(aws cloudformation describe-stacks --stack-name technexus-frontend-${ENVIRONMENT_NAME}
+        --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)
+
+      - echo "Syncing frontend build to s3://$BUCKET"
+      - aws s3 sync frontend/dist "s3://$BUCKET" --delete
+
+      - echo "Invalidating CloudFront distribution $DIST_ID"
+      - aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
+
+      - SITE_URL=$(aws cloudformation describe-stacks --stack-name technexus-frontend-${ENVIRONMENT_NAME}
+        --query "Stacks[0].Outputs[?OutputKey=='SiteUrl'].OutputValue" --output text)
+      - echo "Deployed. Site: $SITE_URL   API: $API_URL"

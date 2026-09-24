@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  TechNexus - Database stack (RDS PostgreSQL in private subnets + a Secrets
+  Manager secret holding the generated master password). Depends on the
+  network stack's exports.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [dev, uat, prod]
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+
+  DBName:
+    Type: String
+    Default: technexus
+
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+
+Resources:
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub technexus/${EnvironmentName}/db-credentials
+      Description: Auto-generated master credentials for the TechNexus RDS instance
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "technexus"}'
+        GenerateStringKey: password
+        ExcludePunctuation: true
+        PasswordLength: 24
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub Private subnets for technexus-${EnvironmentName} RDS
+      SubnetIds:
+        - Fn::ImportValue: !Sub technexus-${EnvironmentName}-PrivateSubnet1
+        - Fn::ImportValue: !Sub technexus-${EnvironmentName}-PrivateSubnet2
+
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub Allow Postgres from the TechNexus backend service (${EnvironmentName})
+      VpcId:
+        Fn::ImportValue: !Sub technexus-${EnvironmentName}-VpcId
+      SecurityGroupIngress: []  # Ingress rule added by the backend stack via a separate SG rule resource
+      Tags:
+        - Key: Name
+          Value: !Sub technexus-${EnvironmentName}-db-sg
+
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub technexus-${EnvironmentName}
+      Engine: postgres
+      EngineVersion: '16.4'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBName: !Ref DBName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+      VPCSecurityGroups: [!Ref DBSecurityGroup]
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 3
+      StorageEncrypted: true
+
+Outputs:
+  DBEndpoint:
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub technexus-${EnvironmentName}-DBEndpoint
+  DBPort:
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub technexus-${EnvironmentName}-DBPort
+  DBSecurityGroupId:
+    Value: !Ref DBSecurityGroup
+    Export:
+      Name: !Sub technexus-${EnvironmentName}-DBSecurityGroupId
+  DBSecretArn:
+    Value: !Ref DBSecret
+    Export:
+      Name: !Sub technexus-${EnvironmentName}-DBSecretArn
