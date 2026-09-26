@@ -41,13 +41,11 @@ Parameters:
     Description: Azure OpenAI deployment name (not necessarily the base model name)
 
 Resources:
-  ECRRepository:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub technexus-backend-${EnvironmentName}
-      ImageScanningConfiguration:
-        ScanOnPush: true
-
+  # NOTE: the ECR repo itself is deliberately NOT managed here. It's created
+  # idempotently by infra/buildspec-build.yml (describe-repositories ||
+  # create-repository) during the Build stage, which runs before this stack
+  # exists on a first-ever pipeline execution. Declaring it again as a
+  # CloudFormation resource here caused an "already exists" conflict.
   Cluster:
     Type: AWS::ECS::Cluster
     Properties:
