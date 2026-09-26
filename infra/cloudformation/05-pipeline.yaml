@@ -1,9 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   TechNexus - CI/CD pipeline: GitHub source (via CodeConnections) -> CodeBuild
-  (build+push image, build frontend) -> deploy to Dev -> manual approval ->
-  promote the SAME build artifact to UAT. Matches the workshop's Dev/UAT
-  promotion model (Day 3 labs).
+  (build+push image, build frontend) -> Deploy to Dev -> manual approval ->
+  Deploy to UAT. Matches the workshop's Dev/UAT promotion model (Day 3 labs).
   NOTE: the CodeConnections connection must be created and authorized via the
   console/CLI first (OAuth handshake can't be scripted in CloudFormation) —
   pass its ARN as ConnectionArn.
@@ -21,10 +20,20 @@ Parameters:
     Type: String
     Default: main
 
-  AnthropicSecretArnDev:
+  AzureOpenAiSecretArnDev:
     Type: String
-  AnthropicSecretArnUat:
+    Description: ARN of the Secrets Manager secret (Dev) holding AZURE_OPENAI_API_KEY
+  AzureOpenAiSecretArnUat:
     Type: String
+    Description: ARN of the Secrets Manager secret (UAT) holding AZURE_OPENAI_API_KEY
+
+  AzureOpenAiEndpoint:
+    Type: String
+    Description: Azure OpenAI resource endpoint, shared across Dev/UAT
+
+  AzureOpenAiDeployment:
+    Type: String
+    Default: gpt-5-mini
 
 Resources:
   ArtifactBucket:
@@ -181,8 +190,12 @@ Resources:
         EnvironmentVariables:
           - Name: ENVIRONMENT_NAME
             Value: dev
-          - Name: ANTHROPIC_SECRET_ARN
-            Value: !Ref AnthropicSecretArnDev
+          - Name: AZURE_OPENAI_SECRET_ARN
+            Value: !Ref AzureOpenAiSecretArnDev
+          - Name: AZURE_OPENAI_ENDPOINT
+            Value: !Ref AzureOpenAiEndpoint
+          - Name: AZURE_OPENAI_DEPLOYMENT
+            Value: !Ref AzureOpenAiDeployment
       Source:
         Type: CODEPIPELINE
         BuildSpec: infra/buildspec-deploy.yml
@@ -200,8 +213,12 @@ Resources:
         EnvironmentVariables:
           - Name: ENVIRONMENT_NAME
             Value: uat
-          - Name: ANTHROPIC_SECRET_ARN
-            Value: !Ref AnthropicSecretArnUat
+          - Name: AZURE_OPENAI_SECRET_ARN
+            Value: !Ref AzureOpenAiSecretArnUat
+          - Name: AZURE_OPENAI_ENDPOINT
+            Value: !Ref AzureOpenAiEndpoint
+          - Name: AZURE_OPENAI_DEPLOYMENT
+            Value: !Ref AzureOpenAiDeployment
       Source:
         Type: CODEPIPELINE
         BuildSpec: infra/buildspec-deploy.yml

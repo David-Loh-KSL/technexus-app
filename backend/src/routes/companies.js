@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
-const { enrichCompany } = require('../services/anthropic');
+const { enrichCompany } = require('../services/azureOpenAI');
 
 const router = express.Router();
 
@@ -120,7 +120,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // POST /api/companies/enrich  { name, doc? }
-// Researches the company via Claude + web search (server-side, real API key)
+// Researches the company via Azure OpenAI (server-side, real API key)
 // and inserts the resulting record directly, matching the original artifact's
 // "Retrieve & preview" -> auto-add UX.
 router.post('/enrich', async (req, res) => {

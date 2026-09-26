@@ -23,13 +23,22 @@ Parameters:
     Type: Number
     Default: 1
 
-  # The Anthropic API key must be created manually in Secrets Manager first
+  # The Azure OpenAI key must be created manually in Secrets Manager first
   # (never put a real key in a template or parameter file committed to Git).
-  #   aws secretsmanager create-secret --name technexus/<env>/anthropic-api-key \
-  #     --secret-string '{"ANTHROPIC_API_KEY":"sk-ant-..."}'
-  AnthropicSecretArn:
+  #   aws secretsmanager create-secret --name technexus/<env>/azure-openai-key \
+  #     --secret-string '{"AZURE_OPENAI_API_KEY":"..."}'
+  AzureOpenAiSecretArn:
     Type: String
-    Description: ARN of the Secrets Manager secret holding ANTHROPIC_API_KEY
+    Description: ARN of the Secrets Manager secret holding AZURE_OPENAI_API_KEY
+
+  AzureOpenAiEndpoint:
+    Type: String
+    Description: Azure OpenAI resource endpoint, e.g. https://your-resource.openai.azure.com/
+
+  AzureOpenAiDeployment:
+    Type: String
+    Default: gpt-5-mini
+    Description: Azure OpenAI deployment name (not necessarily the base model name)
 
 Resources:
   ECRRepository:
@@ -64,7 +73,7 @@ Resources:
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource:
-                  - !Ref AnthropicSecretArn
+                  - !Ref AzureOpenAiSecretArn
                   - Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBSecretArn
 
   TaskRole:
@@ -112,6 +121,10 @@ Resources:
               Value: technexus
             - Name: PGSSL
               Value: 'true'
+            - Name: AZURE_OPENAI_ENDPOINT
+              Value: !Ref AzureOpenAiEndpoint
+            - Name: AZURE_OPENAI_DEPLOYMENT
+              Value: !Ref AzureOpenAiDeployment
           Secrets:
             - Name: PGUSER
               ValueFrom:
@@ -125,8 +138,8 @@ Resources:
                   - '${SecretArn}:password::'
                   - SecretArn:
                       Fn::ImportValue: !Sub technexus-${EnvironmentName}-DBSecretArn
-            - Name: ANTHROPIC_API_KEY
-              ValueFrom: !Sub '${AnthropicSecretArn}:ANTHROPIC_API_KEY::'
+            - Name: AZURE_OPENAI_API_KEY
+              ValueFrom: !Sub '${AzureOpenAiSecretArn}:AZURE_OPENAI_API_KEY::'
           LogConfiguration:
             LogDriver: awslogs
             Options:

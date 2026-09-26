@@ -1,9 +1,10 @@
 version: 0.2
 
 # Reused for both the DeployToDev and DeployToUAT pipeline stages.
-# ENVIRONMENT_NAME and ANTHROPIC_SECRET_ARN are set per CodeBuild project
-# (see 05-pipeline.yaml) — this is what makes "promotion" mean re-running
-# the exact same buildspec/artifact against a different target environment.
+# ENVIRONMENT_NAME, AZURE_OPENAI_SECRET_ARN, AZURE_OPENAI_ENDPOINT and
+# AZURE_OPENAI_DEPLOYMENT are set per CodeBuild project (see 05-pipeline.yaml)
+# — this is what makes "promotion" mean re-running the exact same
+# buildspec/artifact against a different target environment.
 
 phases:
   install:
@@ -34,7 +35,7 @@ phases:
         aws cloudformation deploy
         --stack-name technexus-backend-${ENVIRONMENT_NAME}
         --template-file infra/cloudformation/03-backend-ecs.yaml
-        --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME} ImageTag=${IMAGE_TAG} AnthropicSecretArn=${ANTHROPIC_SECRET_ARN}
+        --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME} ImageTag=${IMAGE_TAG} AzureOpenAiSecretArn=${AZURE_OPENAI_SECRET_ARN} AzureOpenAiEndpoint=${AZURE_OPENAI_ENDPOINT} AzureOpenAiDeployment=${AZURE_OPENAI_DEPLOYMENT}
         --capabilities CAPABILITY_NAMED_IAM
         --no-fail-on-empty-changeset
 
