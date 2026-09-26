@@ -23,7 +23,10 @@ phases:
       - echo "IMAGE_TAG=$IMAGE_TAG" > image_tag.env
       - echo $IMAGE_TAG > imagetag.txt
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
-      # Create the Dev ECR repo if this is the first-ever build (idempotent)
+      # Create the Dev/UAT ECR repos if this is the first-ever build (idempotent).
+      # NOTE: these repos are intentionally NOT managed by 03-backend-ecs.yaml
+      # (CloudFormation would fight this step for ownership) — this is the one
+      # place that creates/owns them.
       - aws ecr describe-repositories --repository-names $ECR_REPO_DEV --region $AWS_DEFAULT_REGION || aws ecr create-repository --repository-name $ECR_REPO_DEV --region $AWS_DEFAULT_REGION
       - aws ecr describe-repositories --repository-names $ECR_REPO_UAT --region $AWS_DEFAULT_REGION || aws ecr create-repository --repository-name $ECR_REPO_UAT --region $AWS_DEFAULT_REGION
 
@@ -38,8 +41,13 @@ phases:
       - docker tag backend:$IMAGE_TAG ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO_UAT}:$IMAGE_TAG
       - docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO_DEV}:$IMAGE_TAG
       - docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPO_UAT}:$IMAGE_TAG
-      - echo "Building frontend"
+      - echo "Sanity-building frontend (not what gets deployed — DeployToDev/UAT rebuild it per-environment with the real API URL)"
       - cd frontend && npm run build && cd ..
+      # Strip node_modules before CodePipeline packages the output artifact —
+      # DeployToDev/UAT reinstall fresh (see buildspec-deploy.yml) rather than
+      # carrying a large, potentially platform-specific node_modules tree
+      # through the pipeline artifact.
+      - rm -rf frontend/node_modules backend/node_modules
 
   post_build:
     commands:
@@ -49,5 +57,5 @@ artifacts:
   files:
     - imagetag.txt
     - infra/**/*
-    - frontend/dist/**/*
+    - frontend/**/*
   discard-paths: no

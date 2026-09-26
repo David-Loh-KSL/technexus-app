@@ -33,6 +33,9 @@ phases:
       # Rebuild the frontend with this environment's API URL baked in.
       # (Vite bakes VITE_* vars in at build time, so each environment needs
       # its own quick rebuild here rather than reusing one static bundle.)
+      # node_modules wasn't carried in the pipeline artifact (stripped in
+      # buildspec-build.yml to keep it small), so reinstall fresh here first.
+      - cd frontend && npm install && cd ..
       - cd frontend && VITE_API_BASE_URL=$API_URL npm run build && cd ..
 
       - BUCKET=$(aws cloudformation describe-stacks --stack-name technexus-frontend-${ENVIRONMENT_NAME} --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text)
