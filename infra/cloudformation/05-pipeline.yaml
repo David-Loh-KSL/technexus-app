@@ -86,27 +86,54 @@ Resources:
                   - ecr:UploadLayerPart
                   - ecr:CompleteLayerUpload
                   - ecr:CreateRepository
-                  - ecr:DescribeRepositories
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - cloudformation:CreateStack
-                  - cloudformation:UpdateStack
-                  - cloudformation:DescribeStacks
-                  - cloudformation:DescribeStackEvents
-                  - cloudformation:CreateChangeSet
-                  - cloudformation:DescribeChangeSet
-                  - cloudformation:ExecuteChangeSet
-                  - cloudformation:DeleteChangeSet
-                  - cloudformation:GetTemplateSummary
+                  - cloudformation:*
+                Resource: '*'
+              - Effect: Allow
+                # CodeBuild's own credentials are what CloudFormation uses to
+                # actually create every resource in the network/database/backend/
+                # frontend stacks (no separate CloudFormation service role is
+                # configured), so this role needs create/manage permissions for
+                # every resource type those 4 templates provision — not just
+                # Describe/Read access.
+                Action:
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - rds:*
+                  - ecs:*
+                  - logs:*
+                  - cloudfront:*
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - ecs:UpdateService
-                  - ecs:DescribeServices
-                  - ecs:RegisterTaskDefinition
-                  - ecs:DescribeTaskDefinition
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:TagResource
+                  - secretsmanager:GetRandomPassword
                 Resource: '*'
+              - Effect: Allow
+                # Scoped to roles this app's own templates create/name — not a
+                # blanket IAM grant. Covers the ECS execution/task roles created
+                # by 03-backend-ecs.yaml.
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:TagRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/technexus-*
               - Effect: Allow
                 Action:
                   - iam:PassRole
@@ -115,18 +142,16 @@ Resources:
                   StringEquals:
                     iam:PassedToService: ecs-tasks.amazonaws.com
               - Effect: Allow
+                # S3 bucket lifecycle for the frontend hosting stack (04-frontend-hosting.yaml)
                 Action:
-                  - cloudfront:CreateInvalidation
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - ec2:Describe*
-                  - elasticloadbalancing:Describe*
-                Resource: '*'
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketOwnershipControls
+                  - s3:PutEncryptionConfiguration
+                Resource:
+                  - !Sub arn:aws:s3:::technexus-*-frontend-${AWS::AccountId}
 
   PipelineRole:
     Type: AWS::IAM::Role
