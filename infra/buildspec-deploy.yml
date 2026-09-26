@@ -45,4 +45,4 @@ phases:
       - aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
 
       - SITE_URL=$(aws cloudformation describe-stacks --stack-name technexus-frontend-${ENVIRONMENT_NAME} --query "Stacks[0].Outputs[?OutputKey=='SiteUrl'].OutputValue" --output text)
-      - echo "Deployed. Site: $SITE_URL   API: $API_URL"
+      - 'echo "Deployed. Site: $SITE_URL   API: $API_URL"'
