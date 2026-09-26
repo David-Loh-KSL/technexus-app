@@ -11,6 +11,13 @@ Parameters:
   EnvironmentName:
     Type: String
     AllowedValues: [dev, uat, prod]
+  AlbDnsName:
+    Type: String
+    Description: >
+      Backend ALB's bare hostname, passed in explicitly (not via
+      Fn::ImportValue) so updates to the backend stack are never blocked by
+      this stack's dependency on it — cross-stack exports can't be modified
+      while another stack imports them, which caused real deploy failures.
 
 Resources:
   SiteBucket:
@@ -53,11 +60,9 @@ Resources:
             S3OriginConfig:
               OriginAccessIdentity: ''
           - Id: alb-origin
-            # Bare ALB hostname (no scheme) — the ALB only listens on HTTP,
-            # so the origin protocol policy below is deliberately http-only;
-            # the browser<->CloudFront leg is still HTTPS either way.
-            DomainName:
-              Fn::ImportValue: !Sub technexus-${EnvironmentName}-AlbDnsName
+            # Bare ALB hostname (no scheme) — passed as a parameter, not
+            # imported (see note on the AlbDnsName parameter above).
+            DomainName: !Ref AlbDnsName
             CustomOriginConfig:
               OriginProtocolPolicy: http-only
               HTTPPort: 80

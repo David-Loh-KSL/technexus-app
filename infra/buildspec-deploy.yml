@@ -23,8 +23,11 @@ phases:
       - echo "Deploying backend ECS stack with image tag $IMAGE_TAG"
       - aws cloudformation deploy --stack-name technexus-backend-${ENVIRONMENT_NAME} --template-file infra/cloudformation/03-backend-ecs.yaml --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME} ImageTag=${IMAGE_TAG} AzureOpenAiSecretArn=${AZURE_OPENAI_SECRET_ARN} AzureOpenAiEndpoint=${AZURE_OPENAI_ENDPOINT} AzureOpenAiDeployment=${AZURE_OPENAI_DEPLOYMENT} --capabilities CAPABILITY_NAMED_IAM --no-fail-on-empty-changeset
 
+      - echo "Fetching ALB DNS name to pass into the frontend stack (explicit parameter, not Fn::ImportValue — an in-use cross-stack export blocks future backend updates)"
+      - ALB_DNS=$(aws cloudformation describe-stacks --stack-name technexus-backend-${ENVIRONMENT_NAME} --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text)
+
       - echo "Deploying frontend hosting stack"
-      - aws cloudformation deploy --stack-name technexus-frontend-${ENVIRONMENT_NAME} --template-file infra/cloudformation/04-frontend-hosting.yaml --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME} --no-fail-on-empty-changeset
+      - aws cloudformation deploy --stack-name technexus-frontend-${ENVIRONMENT_NAME} --template-file infra/cloudformation/04-frontend-hosting.yaml --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME} AlbDnsName=${ALB_DNS} --no-fail-on-empty-changeset
 
       - echo "Fetching API URL (for logging only — CloudFront now proxies /api/* to it, so the frontend build doesn't need this baked in)"
       - API_URL=$(aws cloudformation describe-stacks --stack-name technexus-backend-${ENVIRONMENT_NAME} --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
