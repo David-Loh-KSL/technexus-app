@@ -84,6 +84,21 @@ Resources:
           - Effect: Allow
             Principal: { Service: ecs-tasks.amazonaws.com }
             Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsExecSsm
+          # Required for `aws ecs execute-command` (a shell into the running
+          # container, used for one-off DB migration/seeding since RDS sits
+          # in a private subnet with no other easy access path).
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
 
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -224,6 +239,7 @@ Resources:
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
+      EnableExecuteCommand: true
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
