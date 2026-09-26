@@ -3,6 +3,9 @@ Description: >
   TechNexus - Frontend hosting stack: private S3 bucket + CloudFront with
   Origin Access Control. The pipeline syncs the Vite build output (dist/)
   into this bucket and invalidates the distribution on each deploy.
+  CloudFront also proxies /api/* to the backend ALB, so the browser only
+  ever talks to one HTTPS origin — the ALB itself has no TLS listener, so
+  calling it directly from an HTTPS page would be blocked as mixed content.
 
 Parameters:
   EnvironmentName:
@@ -49,6 +52,17 @@ Resources:
             OriginAccessControlId: !Ref OAC
             S3OriginConfig:
               OriginAccessIdentity: ''
+          - Id: alb-origin
+            # Bare ALB hostname (no scheme) — the ALB only listens on HTTP,
+            # so the origin protocol policy below is deliberately http-only;
+            # the browser<->CloudFront leg is still HTTPS either way.
+            DomainName:
+              Fn::ImportValue: !Sub technexus-${EnvironmentName}-AlbDnsName
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+              HTTPSPort: 443
+              OriginSSLProtocols: [TLSv1.2]
         DefaultCacheBehavior:
           TargetOriginId: s3-origin
           ViewerProtocolPolicy: redirect-to-https
@@ -56,6 +70,15 @@ Resources:
           CachedMethods: [GET, HEAD]
           Compress: true
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # AWS managed "CachingOptimized"
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: alb-origin
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9d4e-daaa7e9c22f9 # AWS managed "CachingDisabled"
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AWS managed "AllViewerExceptHostHeader"
 
   BucketPolicy:
     Type: AWS::S3::BucketPolicy

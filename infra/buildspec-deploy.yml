@@ -26,17 +26,20 @@ phases:
       - echo "Deploying frontend hosting stack"
       - aws cloudformation deploy --stack-name technexus-frontend-${ENVIRONMENT_NAME} --template-file infra/cloudformation/04-frontend-hosting.yaml --parameter-overrides EnvironmentName=${ENVIRONMENT_NAME} --no-fail-on-empty-changeset
 
-      - echo "Fetching API URL to bake into the frontend build"
+      - echo "Fetching API URL (for logging only — CloudFront now proxies /api/* to it, so the frontend build doesn't need this baked in)"
       - API_URL=$(aws cloudformation describe-stacks --stack-name technexus-backend-${ENVIRONMENT_NAME} --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
       - echo "API_URL=$API_URL"
 
-      # Rebuild the frontend with this environment's API URL baked in.
-      # (Vite bakes VITE_* vars in at build time, so each environment needs
-      # its own quick rebuild here rather than reusing one static bundle.)
+      # Rebuild the frontend for this environment. VITE_API_BASE_URL is
+      # deliberately left empty: the frontend calls same-origin /api/... and
+      # CloudFront's /api/* behavior forwards those to the ALB (see
+      # 04-frontend-hosting.yaml). Baking in the raw ALB http:// URL here
+      # would make the browser call HTTP from an HTTPS page — blocked as
+      # mixed content.
       # node_modules wasn't carried in the pipeline artifact (stripped in
       # buildspec-build.yml to keep it small), so reinstall fresh here first.
       - cd frontend && npm install && cd ..
-      - cd frontend && VITE_API_BASE_URL=$API_URL npm run build && cd ..
+      - cd frontend && npm run build && cd ..
 
       - BUCKET=$(aws cloudformation describe-stacks --stack-name technexus-frontend-${ENVIRONMENT_NAME} --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text)
       - DIST_ID=$(aws cloudformation describe-stacks --stack-name technexus-frontend-${ENVIRONMENT_NAME} --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text)

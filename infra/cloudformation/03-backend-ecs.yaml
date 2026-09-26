@@ -241,6 +241,12 @@ Outputs:
     Value: !Sub http://${ALB.DNSName}
     Export:
       Name: !Sub technexus-${EnvironmentName}-ApiUrl
+  AlbDnsName:
+    # Bare hostname (no scheme) — CloudFront's Origin DomainName needs this,
+    # not the http:// prefixed ApiUrl above.
+    Value: !GetAtt ALB.DNSName
+    Export:
+      Name: !Sub technexus-${EnvironmentName}-AlbDnsName
   EcrRepositoryUri:
     Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/technexus-backend-${EnvironmentName}
     Export:
